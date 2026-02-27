@@ -1,3 +1,4 @@
+#microagent.py
 import io
 import re
 from itertools import chain
@@ -12,6 +13,7 @@ from openhands.core.exceptions import (
 )
 from openhands.core.logger import openhands_logger as logger
 from openhands.microagent.types import InputMetadata, MicroagentMetadata, MicroagentType
+from openhands.microagent.section_parser import parse_sections
 
 
 class BaseMicroagent(BaseModel):
@@ -32,20 +34,21 @@ class BaseMicroagent(BaseModel):
     @classmethod
     def _handle_third_party(
         cls, path: Path, file_content: str
-    ) -> Union['RepoMicroagent', None]:
-        # Determine the agent name based on file type
+    ) -> Union[list['KnowledgeMicroagent'], None]:
         microagent_name = cls.PATH_TO_THIRD_PARTY_MICROAGENT_NAME.get(path.name.lower())
-
-        # Create RepoMicroagent if we recognized the file type
         if microagent_name is not None:
-            return RepoMicroagent(
+            agents = parse_sections(file_content, source_path=str(path))
+            if agents:
+                return agents
+            # Fallback: if parser produces nothing, return original RepoMicroagent
+            logger.warning(f'[SCA] section_parser produced no agents for {path}, falling back to RepoMicroagent')
+            return [RepoMicroagent(
                 name=microagent_name,
                 content=file_content,
                 metadata=MicroagentMetadata(name=microagent_name),
                 source=str(path),
                 type=MicroagentType.REPO_KNOWLEDGE,
-            )
-
+            )]
         return None
 
     @classmethod
@@ -86,9 +89,12 @@ class BaseMicroagent(BaseModel):
             )
 
         # Handle third-party agent instruction files
-        third_party_agent = cls._handle_third_party(path, file_content)
-        if third_party_agent is not None:
-            return third_party_agent
+        # SCA: _handle_third_party now returns a list of KnowledgeMicroagents.
+        # load() can only return one agent, so we return the first one.
+        # The full list is handled by load_microagents_from_dir directly.
+        third_party_agents = cls._handle_third_party(path, file_content)
+        if third_party_agents is not None:
+            return third_party_agents[0]
 
         file_io = io.StringIO(file_content)
         loaded = frontmatter.load(file_io)
@@ -319,11 +325,23 @@ def load_microagents_from_dir(
     # Process all files in one loop
     for file in chain(special_files, md_files):
         try:
+            # SCA: AGENTS.md files are handled directly via _handle_third_party
+            if file.name.lower() in BaseMicroagent.PATH_TO_THIRD_PARTY_MICROAGENT_NAME:
+                with open(file) as f:
+                    file_content = f.read()
+                result = BaseMicroagent._handle_third_party(file, file_content)
+                if result is not None:
+                    for agent in result:
+                        if isinstance(agent, RepoMicroagent):
+                            repo_agents[agent.name] = agent
+                        elif isinstance(agent, KnowledgeMicroagent):
+                            knowledge_agents[agent.name] = agent
+                continue
+
             agent = BaseMicroagent.load(file, microagent_dir)
             if isinstance(agent, RepoMicroagent):
                 repo_agents[agent.name] = agent
             elif isinstance(agent, KnowledgeMicroagent):
-                # Both KnowledgeMicroagent and TaskMicroagent go into knowledge_agents
                 knowledge_agents[agent.name] = agent
         except MicroagentValidationError as e:
             # For validation errors, include the original exception
