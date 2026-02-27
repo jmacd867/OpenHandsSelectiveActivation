@@ -189,7 +189,7 @@ def parse_sections(
         )
         agent = KnowledgeMicroagent(
             name=agent_name,
-            content=body,
+            content=f"{header_line}\n{body}",
             metadata=metadata,
             source=source_path,
             type=MicroagentType.KNOWLEDGE,

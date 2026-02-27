@@ -130,3 +130,96 @@ def test_content_with_no_headers_returns_no_agents():
 def test_invalid_header_level_raises():
     with pytest.raises(ValueError):
         parse_sections("## Section", header_level="####")
+
+
+# ---------------------------------------------------------------------------
+# match_trigger end-to-end tests — validates activation behaviour
+# ---------------------------------------------------------------------------
+
+def test_match_trigger_gradlew_message(temporal_content):
+    agents = parse_sections(temporal_content)
+    agent = next(a for a in agents if a.name == "sca_building_and_testing")
+    result = agent.match_trigger("I need to run gradlew to build the project")
+    assert result is not None, (
+        f"sca_building_and_testing should activate on 'gradlew' message, triggers: {agent.triggers}"
+    )
+
+
+def test_match_trigger_commit_message(temporal_content):
+    agents = parse_sections(temporal_content)
+    agent = next(a for a in agents if a.name == "sca_commit_messages_and_pull_requests")
+    result = agent.match_trigger("I am ready to commit these changes")
+    assert result is not None
+
+
+def test_match_trigger_pr_react(react_content):
+    agents = parse_sections(react_content)
+    agent = next(a for a in agents if a.name == "sca_pr_instructions")
+    result = agent.match_trigger("What is the correct PR title format for this project?")
+    assert result is not None
+
+
+def test_match_trigger_no_false_positive(temporal_content):
+    """Review checklist should not fire on a generic code-writing message."""
+    agents = parse_sections(temporal_content)
+    agent = next(a for a in agents if a.name == "sca_review_checklist")
+    result = agent.match_trigger("I will write a new function for the API")
+    assert result is None, (
+        f"sca_review_checklist fired unexpectedly. Matched: {result}. "
+        f"Triggers: {agent.triggers}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Over-suppression rate tests — recall check: no section is permanently dark
+# ---------------------------------------------------------------------------
+
+_TEMPORAL_ACTIVATION_MESSAGES = {
+    "sca_repository_layout":                  "Where is the temporal-sdk module located in the repository?",
+    "sca_general_guidance":                   "Should I avoid changing public API signatures here?",
+    "sca_building_and_testing":               "I need to run gradlew to execute the test suite.",
+    "sca_tests":                              "Where are the tests located for the temporal-sdk package?",
+    "sca_commit_messages_and_pull_requests":  "I am writing a commit message for these changes.",
+    "sca_review_checklist":                   "I need to run spotlesscheck before merging.",
+}
+
+_REACT_ACTIVATION_MESSAGES = {
+    "sca_dev_environment_tips":   "How do I set up the vite dev environment for this package?",
+    "sca_testing_instructions":   "I need to run the test suite with pnpm turbo.",
+    "sca_pr_instructions":        "What is the correct PR title format for this project?",
+}
+
+
+def test_no_section_permanently_dark_temporal(temporal_content):
+    """Every Temporal section must activate on at least one realistic message."""
+    agents = parse_sections(temporal_content)
+    for agent in agents:
+        message = _TEMPORAL_ACTIVATION_MESSAGES.get(agent.name)
+        assert message is not None, f"No activation message defined for {agent.name}"
+        result = agent.match_trigger(message)
+        assert result is not None, (
+            f"Section '{agent.name}' failed to activate.\n"
+            f"  Message : {message}\n"
+            f"  Triggers: {agent.triggers}"
+        )
+
+
+def test_no_section_permanently_dark_react(react_content):
+    """Every React section must activate on at least one realistic message."""
+    agents = parse_sections(react_content)
+    for agent in agents:
+        message = _REACT_ACTIVATION_MESSAGES.get(agent.name)
+        assert message is not None, f"No activation message defined for {agent.name}"
+        result = agent.match_trigger(message)
+        assert result is not None, (
+            f"Section '{agent.name}' failed to activate.\n"
+            f"  Message : {message}\n"
+            f"  Triggers: {agent.triggers}"
+        )
+
+def test_content_includes_header(temporal_content):
+    agents = parse_sections(temporal_content)
+    agent = next(a for a in agents if a.name == "sca_building_and_testing")
+    assert agent.content.startswith("## Building and Testing"), (
+        f"Expected content to start with header line, got: {agent.content[:80]}"
+    )
