@@ -43,6 +43,8 @@ _SYNONYMS: dict[str, list[str]] = {
     "sdk":       ["temporal sdk"],
     "api":       ["interface"],
 }
+_SHORT_ALLOWLIST = {"pr", "ci", "cd", "ui", "qa"}
+
 
 # Minimum character length for a token to be considered a trigger candidate.
 _MIN_TOKEN_LEN = 3
@@ -54,7 +56,7 @@ _TOP_BODY_NOUNS = 3
 def _tokenize(text: str) -> list[str]:
     """Lowercase alphanumeric tokens, stripping punctuation."""
     return [t for t in re.findall(r"[a-z0-9](?:[a-z0-9\-\.]*[a-z0-9])?", text.lower())
-            if len(t) >= _MIN_TOKEN_LEN and t not in _STOP_WORDS]
+            if (len(t) >= _MIN_TOKEN_LEN or t in _SHORT_ALLOWLIST) and t not in _STOP_WORDS]
 
 
 def _header_triggers(header: str) -> list[str]:
