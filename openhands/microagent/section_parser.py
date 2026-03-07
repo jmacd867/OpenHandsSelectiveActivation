@@ -45,12 +45,39 @@ _SYNONYMS: dict[str, list[str]] = {
 }
 _SHORT_ALLOWLIST = {"pr", "ci", "cd", "ui", "qa"}
 
+# ---------------------------------------------------------------------------
+# Foundational headers: sections always active regardless of trigger matching.
+# These describe universal development practices required for any coding task.
+# Root cause of v1 regression: testing sections suppressed 43 times across
+# 138-instance run because task descriptions describe bugs/features, not tests.
+# ---------------------------------------------------------------------------
+_FOUNDATIONAL_KEYWORDS = {
+    # Testing — primary root cause of v1 losses
+    "test", "tests", "testing",
+    "testing_guidelines", "testing_best_practices", "testing_and_ci",
+    "snapshot_test", "snapshot_tests",
+    "build_test", "build_and_test", "build_test_and_development",
+    # Build/commit — universal to all coding tasks
+    "build", "building", "commit", "commits", "contributing",
+    "pull_request", "review", "checklist",
+}
+
+# Sentinel trigger value recognised by sca_planner as unconditional activation.
+_ALWAYS_ACTIVE_SENTINEL = "__always_active__"
 
 # Minimum character length for a token to be considered a trigger candidate.
 _MIN_TOKEN_LEN = 3
 
 # Number of high-frequency body nouns to add as supplementary triggers.
 _TOP_BODY_NOUNS = 3
+
+
+def _is_foundational(header_line: str) -> bool:
+    """Return True if this section should always be active regardless of triggers."""
+    slug = re.sub(r"^#+\s*", "", header_line).strip().lower()
+    slug_normalized = re.sub(r"[^a-z0-9]+", "_", slug).strip("_")
+    tokens = set(slug_normalized.split("_"))
+    return bool(tokens & _FOUNDATIONAL_KEYWORDS)
 
 
 def _tokenize(text: str) -> list[str]:
@@ -64,7 +91,7 @@ def _header_triggers(header: str) -> list[str]:
     Extract trigger keywords directly from a section header.
 
     The header tokens are the highest-signal triggers because they name the
-    section explicitly (e.g. 'Building and Testing' → ['building', 'testing']).
+    section explicitly (e.g. 'Building and Testing' -> ['building', 'testing']).
     Multi-word headers also produce a normalised phrase trigger.
     """
     # Strip leading # characters and whitespace
@@ -91,6 +118,7 @@ def _body_triggers(body: str, header_triggers: list[str]) -> list[str]:
     existing = set(header_triggers)
     counts = Counter(t for t in tokens if t not in existing)
     return [word for word, _ in counts.most_common(_TOP_BODY_NOUNS)]
+
 
 def _tfidf_triggers(
     sections: list[tuple[str, str]],
@@ -176,6 +204,15 @@ def parse_sections(
                     expanded.append(syn)
 
         all_triggers = list(dict.fromkeys(expanded))
+
+        # Force-activate foundational sections (testing, build, commit).
+        # These are suppressed by keyword matching because task descriptions
+        # describe bugs/features rather than mentioning tests explicitly.
+        # v1 root cause: sca_testing* suppressed 43 times across 138 instances.
+        if _is_foundational(header_line):
+            if _ALWAYS_ACTIVE_SENTINEL not in all_triggers:
+                all_triggers.append(_ALWAYS_ACTIVE_SENTINEL)
+
         if not all_triggers:
             print(f"[SCA] Warning: no triggers for section '{header_line}', skipping.")
             continue
@@ -216,5 +253,6 @@ if __name__ == "__main__":
     for a in agents:
         print(f"  [{a.name}]")
         print(f"    triggers : {a.triggers}")
+        print(f"    foundational: {_ALWAYS_ACTIVE_SENTINEL in a.triggers}")
         print(f"    content  : {a.content[:80].replace(chr(10), ' ')!r}...")
         print()
